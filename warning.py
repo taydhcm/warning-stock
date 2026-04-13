@@ -7,10 +7,11 @@ from vnstock import Vnstock, register_user
 from datetime import datetime, timedelta
 import requests
 import warnings
+import os
+import json
 
 warnings.filterwarnings('ignore')
 
-# ====================== CẤU HÌNH ======================
 st.set_page_config(page_title="Warning System", layout="wide")
 st.title("🚨 Warning System - Cảnh báo vị thế đã mua")
 st.markdown("**Quét 3 timeframe • Tự động 5 phút • Gửi Telegram**")
@@ -25,12 +26,12 @@ except:
 
 # ====================== TELEGRAM CONFIG ======================
 if 'telegram_token' not in st.session_state:
-    st.session_state.telegram_token = ""
+    st.session_state.telegram_token = "8516741675:AAE8rdixZX6x7e-ZtXXH1YjZC-PehUFkLOA"
 if 'telegram_chat_id' not in st.session_state:
-    st.session_state.telegram_chat_id = ""
+    st.session_state.telegram_chat_id = "1247850754"
 
 with st.sidebar.expander("📲 Telegram Alert", expanded=False):
-    st.session_state.telegram_token = st.text_input("Telegram Bot Token", 
+    st.session_state.telegram_token = st.text_input("token bot telegram", 
         value=st.session_state.telegram_token, type="password")
     st.session_state.telegram_chat_id = st.text_input("Chat ID", 
         value=st.session_state.telegram_chat_id)
@@ -40,17 +41,38 @@ with st.sidebar.expander("📲 Telegram Alert", expanded=False):
             try:
                 requests.get(f"https://api.telegram.org/bot{st.session_state.telegram_token}/sendMessage",
                     params={"chat_id": st.session_state.telegram_chat_id, "text": "✅ Test thành công từ Warning System"})
-                st.success("Đã gửi tin test thành công!")
+                st.success("Đã gửi test message!")
             except:
                 st.error("Gửi test thất bại")
 
-# ====================== TRỌNG SỐ ======================
+# ====================== LOAD DANH SÁCH TỪ FILE list.env ======================
+HOLDINGS_FILE = "list.env"
+
+def load_holdings():
+    if os.path.exists(HOLDINGS_FILE):
+        try:
+            with open(HOLDINGS_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                return data
+        except:
+            return []
+    return []
+
+def save_holdings(holdings):
+    with open(HOLDINGS_FILE, "w", encoding="utf-8") as f:
+        json.dump(holdings, f, ensure_ascii=False, indent=2)
+
+# Load danh sách khi khởi động
+if 'holdings' not in st.session_state:
+    st.session_state.holdings = load_holdings()
+
+# ====================== TRỌNG SỐ & HÀM CHẤM ĐIỂM ======================
 WEIGHTS = {
     'Momentum': 0.30, 'Trend': 0.22, 'Volume': 0.18,
     'Oscillator': 0.15, 'Volatility': 0.08, 'PriceAction': 0.07
 }
 
-# ====================== HÀM CHẤM ĐIỂM (0-10) ======================
+# (Copy 6 hàm score_xxx từ file cũ của bạn vào đây)
 def score_momentum(crsi, price_vs_hvn="near_hvn"):
     if crsi > 68 and price_vs_hvn == "above_hvn": return 9.5
     elif crsi > 55 and price_vs_hvn in ["near_hvn", "above_hvn"]: return 8.0
@@ -85,7 +107,7 @@ def score_price_action(current_price, support):
     elif current_price > support * 1.008: return 7.0
     else: return 4.0
 
-# ====================== TÍNH ĐIỂM TRÊN MỘT TIMEFRAME ======================
+# ====================== CALCULATE VIEW SCORES ======================
 def calculate_view_scores(df, current_price, support):
     if df is None or df.empty or len(df) < 20:
         return {v: 5.0 for v in WEIGHTS.keys()}
@@ -100,7 +122,7 @@ def calculate_view_scores(df, current_price, support):
 
         obv = ta.obv(close, df['volume'])
         obv_trend = "up" if obv.diff().iloc[-1] > 0 else "down" if obv.diff().iloc[-1] < 0 else "flat"
-        vol_ratio = df['volume'].iloc[-1] / df['volume'].rolling(20).mean().iloc[-1]
+        vol_ratio = df['volume'].iloc[-1] / df['volume'].rolling(20).mean().iloc[-1] if len(df) > 20 else 1.0
 
         crsi = ta.crsi(close, df['high'], df['low'], length=3, fast=2, slow=100).iloc[-1] if len(df) > 100 else 50.0
 
@@ -124,25 +146,8 @@ def calculate_view_scores(df, current_price, support):
 
     return scores
 
-# ====================== TÍNH ĐIỂM TỔNG HỢP 3 TIMEFRAME ======================
-def calculate_multi_timeframe_score(df_30m, df_1h, df_4h, current_price, support):
-    score_30m = calculate_view_scores(df_30m, current_price, support)
-    score_1h  = calculate_view_scores(df_1h,  current_price, support)
-    score_4h  = calculate_view_scores(df_4h,  current_price, support)
-
-    fs_30m = calculate_weighted_score(score_30m)
-    fs_1h  = calculate_weighted_score(score_1h)
-    fs_4h  = calculate_weighted_score(score_4h)
-
-    # Trọng số: 30m=30%, 1h=50%, 4h=20%
-    final_score = (fs_30m * 0.30) + (fs_1h * 0.50) + (fs_4h * 0.20)
-
-    return round(final_score, 2), round(fs_30m, 2), round(fs_1h, 2), round(fs_4h, 2)
-
-# ====================== WEIGHTED SCORE ======================
 def calculate_weighted_score(scores_dict):
     weighted = sum(scores_dict.get(view, 5.0) * weight for view, weight in WEIGHTS.items())
-
     strong = sum(1 for s in scores_dict.values() if s >= 7.0)
     if strong >= 5: weighted += 1.2
     elif strong >= 4: weighted += 0.8
@@ -156,7 +161,20 @@ def calculate_weighted_score(scores_dict):
 
     return round(min(max(weighted, 3.0), 10.0), 2)
 
-# ====================== LẤY DỮ LIỆU (Cache 5 phút) ======================
+# ====================== MULTI TIMEFRAME ======================
+def calculate_multi_timeframe_score(df_30m, df_1h, df_4h, current_price, support):
+    s30 = calculate_view_scores(df_30m, current_price, support)
+    s1h = calculate_view_scores(df_1h,  current_price, support)
+    s4h = calculate_view_scores(df_4h,  current_price, support)
+
+    fs30 = calculate_weighted_score(s30)
+    fs1h = calculate_weighted_score(s1h)
+    fs4h = calculate_weighted_score(s4h)
+
+    final_score = (fs30 * 0.30) + (fs1h * 0.50) + (fs4h * 0.20)
+    return round(final_score, 2), round(fs30, 2), round(fs1h, 2), round(fs4h, 2)
+
+# ====================== LẤY DỮ LIỆU ======================
 @st.cache_data(ttl=300)
 def get_data(symbol, interval="1h", days=60):
     try:
@@ -170,10 +188,7 @@ def get_data(symbol, interval="1h", days=60):
 # ====================== GIAO DIỆN ======================
 st.sidebar.header("📌 Danh sách cổ phiếu đã mua")
 
-if 'holdings' not in st.session_state:
-    st.session_state.holdings = []
-
-# Form thêm cổ phiếu
+# Form thêm mới
 with st.sidebar.form("add_holding"):
     col1, col2 = st.columns([3, 2])
     with col1:
@@ -183,9 +198,10 @@ with st.sidebar.form("add_holding"):
     if st.form_submit_button("➕ Thêm"):
         if symbol:
             st.session_state.holdings.append({"Mã": symbol, "Giá mua": buy_price})
+            save_holdings(st.session_state.holdings)
             st.rerun()
 
-# Hiển thị danh sách
+# Hiển thị danh sách hiện tại
 st.sidebar.subheader("Danh sách hiện tại")
 for i, item in enumerate(st.session_state.holdings):
     col1, col2, col3 = st.sidebar.columns([3, 2, 1])
@@ -194,6 +210,7 @@ for i, item in enumerate(st.session_state.holdings):
     with col3:
         if st.button("🗑", key=f"del_{i}"):
             st.session_state.holdings.pop(i)
+            save_holdings(st.session_state.holdings)
             st.rerun()
 
 # ====================== QUÉT CẢNH BÁO ======================
@@ -201,7 +218,7 @@ if st.button("🚨 Quét cảnh báo ngay", type="primary", use_container_width=
     if not st.session_state.holdings:
         st.error("Chưa có cổ phiếu nào trong danh sách")
     else:
-        with st.spinner("Đang quét 3 timeframe (30m - 1h - 4h)..."):
+        with st.spinner("Đang quét 3 timeframe..."):
             results = []
             for holding in st.session_state.holdings:
                 symbol = holding["Mã"]
@@ -249,5 +266,4 @@ if st.button("🚨 Quét cảnh báo ngay", type="primary", use_container_width=
             )
 
 # Tự động refresh mỗi 5 phút
-st_autorefresh = st.empty()
 st.caption("Hệ thống tự động quét mỗi 5 phút • Telegram alert khi có tín hiệu BÁN")

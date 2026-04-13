@@ -120,112 +120,117 @@ WEIGHTS = {
     'Volatility': 0.05
 }
 
+# ====================== TRỌNG SỐ MỚI (TẬP TRUNG CẢNH BÁO BÁN) ======================
+WEIGHTS = {
+    'Momentum':   0.33,   # Quan trọng nhất cho tín hiệu bán sớm
+    'Volume':     0.27,   # Dòng tiền khô = bán mạnh
+    'PriceAction':0.18,   # Phá support = bán khẩn
+    'Trend':      0.12,
+    'Oscillator': 0.10,
+    'Volatility': 0.00   # Giảm trọng số vì ngắn hạn ít quan trọng
+}
+
 # ====================== HÀM CHẤM ĐIỂM MỚI (NHẠY HƠN) ======================
-def score_momentum(crsi, price_vs_hvn):
-    if crsi > 68 and price_vs_hvn == "above_hvn": return 9.5
+def score_momentum(crsi):
+    if crsi > 68: return 9.5
     elif crsi > 58: return 8.0
     elif crsi > 50: return 6.0
-    elif crsi < 45: return 3.5   # Momentum yếu rõ
+    elif crsi < 45: return 3.0   # Momentum yếu = nguy cơ bán
     else: return 5.0
 
-def score_trend(price, ma20, ma50):
-    if price > ma20 > ma50: return 9.0
-    elif ma20 > ma50: return 7.0
-    elif price > ma20: return 5.5
-    else: return 3.0
-
-def score_oscillator(rsi, stoch):
-    if rsi > 72 or stoch > 80: return 3.5   # Quá mua → dễ điều chỉnh
-    if 48 <= rsi <= 68 and stoch > 55: return 8.5
-    elif 40 <= rsi <= 72: return 6.5
-    else: return 4.0
-
 def score_volume(obv_trend, vol_ratio):
-    if obv_trend == "down": return 3.5          # OBV giảm = rất nguy hiểm
+    if obv_trend == "down": return 3.5          # OBV giảm = bán
     if obv_trend == "up" and vol_ratio > 1.4: return 9.0
-    if vol_ratio > 1.2: return 7.0
-    return 5.0
-
-def score_volatility(band_width):
-    if band_width < 0.08: return 8.5   # Co hẹp → sắp biến động mạnh
-    if band_width > 0.18: return 4.0   # Biến động quá lớn
+    if vol_ratio < 0.8: return 4.0              # Volume khô
     return 6.0
 
-def score_price_action(current_price, support):
-    if current_price < support * 0.985: return 3.5   # Phá support = bán khẩn
-    if current_price > support * 1.018: return 8.5
+def score_price_action(current_price, support, prev_close):
+    if current_price < support * 0.985: return 3.0   # Phá support = bán khẩn
+    if current_price < prev_close * 0.99: return 4.5 # Giá giảm
+    if current_price > support * 1.015: return 8.5
     return 5.5
+
+def score_trend(price, ma20):
+    if price > ma20: return 7.5
+    else: return 4.5
+
+def score_oscillator(rsi):
+    if rsi > 72: return 3.5   # Quá mua → dễ điều chỉnh
+    if rsi < 35: return 4.0
+    if 48 <= rsi <= 65: return 8.0
+    return 5.5
+
+def score_volatility(band_width):
+    if band_width < 0.07: return 8.0   # Co hẹp → sắp biến động
+    if band_width > 0.18: return 4.5   # Biến động lớn
+    return 6.0
 
 # ====================== TÍNH ĐIỂM TRÊN 1 TIMEFRAME ======================
 def calculate_view_scores(df, current_price, support):
     if df is None or df.empty or len(df) < 30:
-        return {k: 5.0 for k in WEIGHTS}
+        return {k: 5.0 for k in WEIGHTS.keys()}
 
     try:
         close = df['close']
         ma20 = close.rolling(20).mean().iloc[-1]
-        ma50 = close.rolling(50).mean().iloc[-1]
         rsi = ta.rsi(close, length=14).iloc[-1]
-        stoch = ta.stoch(df['high'], df['low'], close)['STOCHk_14_3_3'].iloc[-1]
+        stoch = ta.stoch(df['high'], df['low'], close)['STOCHk_14_3_3'].iloc[-1] if len(df) > 14 else 50.0
 
         obv = ta.obv(close, df['volume'])
         obv_trend = "up" if obv.diff().iloc[-1] > 0 else "down" if obv.diff().iloc[-1] < 0 else "flat"
-        vol_ratio = df['volume'].iloc[-1] / df['volume'].rolling(20).mean().iloc[-1]
+        vol_ratio = df['volume'].iloc[-1] / df['volume'].rolling(20).mean().iloc[-1] if len(df) > 20 else 1.0
 
         crsi = ta.crsi(close, df['high'], df['low'], length=3, fast=2, slow=100).iloc[-1] if len(df) > 100 else 50.0
 
         bb = ta.bbands(close, length=20, std=2)
         band_width = (bb['BBU_20_2.0'].iloc[-1] - bb['BBL_20_2.0'].iloc[-1]) / current_price if not bb.empty else 0.12
 
-        price_vs_hvn = "near_hvn"
-        pa_signal = "strong_bounce" if current_price > support * 1.015 else "neutral"
+        prev_close = close.iloc[-2] if len(close) > 1 else current_price
 
     except:
-        return {k: 5.0 for k in WEIGHTS}
+        return {k: 5.0 for k in WEIGHTS.keys()}
 
     scores = {}
-    scores['Momentum']   = score_momentum(crsi, price_vs_hvn)
-    scores['Trend']      = score_trend(current_price, ma20, ma50)
-    scores['Oscillator'] = score_oscillator(rsi, stoch)
+    scores['Momentum']   = score_momentum(crsi)
     scores['Volume']     = score_volume(obv_trend, vol_ratio)
+    scores['PriceAction']= score_price_action(current_price, support, prev_close)
+    scores['Trend']      = score_trend(current_price, ma20)
+    scores['Oscillator'] = score_oscillator(rsi)
     scores['Volatility'] = score_volatility(band_width)
-    scores['PriceAction']= score_price_action(current_price, support)
 
     return scores
 
-# ====================== MULTI TIMEFRAME SCORE ======================
-def calculate_multi_timeframe_score(df_30m, df_1h, df_4h, current_price, support):
+# ====================== MULTI TIMEFRAME (15m & 30m) ======================
+def calculate_multi_timeframe_score(df_15m, df_30m, current_price, support):
+    s15 = calculate_view_scores(df_15m, current_price, support)
     s30 = calculate_view_scores(df_30m, current_price, support)
-    s1h = calculate_view_scores(df_1h,  current_price, support)
-    s4h = calculate_view_scores(df_4h,  current_price, support)
 
+    fs15 = calculate_weighted_score(s15)
     fs30 = calculate_weighted_score(s30)
-    fs1h = calculate_weighted_score(s1h)
-    fs4h = calculate_weighted_score(s4h)
 
-    # Trọng số: 1h quan trọng nhất cho cảnh báo bán
-    final_score = (fs30 * 0.30) + (fs1h * 0.50) + (fs4h * 0.20)
+    # 15m: 40%, 30m: 60%
+    final_score = (fs15 * 0.40) + (fs30 * 0.60)
 
-    return round(final_score, 2), round(fs30, 2), round(fs1h, 2), round(fs4h, 2)
+    return round(final_score, 2), round(fs15, 2), round(fs30, 2)
 
 def calculate_weighted_score(scores_dict):
     weighted = sum(scores_dict.get(v, 5.0) * w for v, w in WEIGHTS.items())
+
     strong = sum(1 for s in scores_dict.values() if s >= 7.5)
     if strong >= 5: weighted += 1.2
     elif strong >= 4: weighted += 0.8
 
-    mom = scores_dict.get('Momentum', 0)
-    vol = scores_dict.get('Volume', 0)
-    if mom >= 8.0 and vol >= 8.0: weighted += 1.1
+    if scores_dict.get('Momentum', 0) >= 8.0 and scores_dict.get('Volume', 0) >= 8.0:
+        weighted += 1.1
 
-    weak = sum(1 for s in scores_dict.values() if s <= 4.5)
-    if weak >= 3: weighted -= 0.8
+    weak = sum(1 for s in scores_dict.values() if s <= 4.0)
+    if weak >= 3: weighted -= 0.9
 
     return round(min(max(weighted, 3.0), 10.0), 2)
 
 # ====================== LẤY DỮ LIỆU ======================
-@st.cache_data(ttl=300)
-def get_data(symbol, interval="1h", days=60):
+@st.cache_data(ttl=1800)  # Cache 30 phút
+def get_data(symbol, interval="15m", days=30):
     try:
         end = datetime.now().strftime("%Y-%m-%d")
         start = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
@@ -265,41 +270,36 @@ for i, item in enumerate(st.session_state.holdings):
 # ====================== QUÉT CẢNH BÁO ======================
 if st.button("🚨 Quét cảnh báo ngay", type="primary", use_container_width=True):
     if not st.session_state.holdings:
-        st.error("Chưa có cổ phiếu nào trong danh sách")
+        st.error("Chưa có cổ phiếu nào")
     else:
-        with st.spinner("Đang quét 3 timeframe..."):
+        with st.spinner("Đang quét 15m & 30m..."):
             results = []
             for holding in st.session_state.holdings:
                 symbol = holding["Mã"]
                 buy_price = holding["Giá mua"]
 
+                df_15m = get_data(symbol, "15m", 30)
                 df_30m = get_data(symbol, "30m", 30)
-                df_1h  = get_data(symbol, "1h",  60)
-                df_4h  = get_data(symbol, "4h",  120)
 
-                current_price = df_1h['close'].iloc[-1] if not df_1h.empty else buy_price
-                support = df_1h['low'].rolling(20).min().iloc[-1] if not df_1h.empty else buy_price * 0.95
+                current_price = df_30m['close'].iloc[-1] if not df_30m.empty else buy_price
+                support = df_30m['low'].rolling(20).min().iloc[-1] if not df_30m.empty else buy_price * 0.95
 
-                final_score, s30, s1h, s4h = calculate_multi_timeframe_score(df_30m, df_1h, df_4h, current_price, support)
+                final_score, s15, s30 = calculate_multi_timeframe_score(df_15m, df_30m, current_price, support)
 
-                recommend = "NẮM GIỮ" if final_score >= 7.0 else "BÁN" if final_score <= 5.5 else "THEO DÕI"
+                recommend = "NẮM GIỮ" if final_score >= 7.2 else "BÁN" if final_score <= 5.2 else "THEO DÕI"
 
                 # Gửi Telegram nếu BÁN
                 if recommend == "BÁN" and st.session_state.telegram_token and st.session_state.telegram_chat_id:
-                    msg = f"🚨 CẢNH BÁO BÁN\nMã: <b>{symbol}</b>\nGiá mua: {buy_price}\nGiá hiện tại: {current_price:.2f}\nFinal Score: {final_score}\n30m: {s30} | 1h: {s1h} | 4h: {s4h}"
-                    try:
-                        requests.get(f"https://api.telegram.org/bot{st.session_state.telegram_token}/sendMessage",
-                            params={"chat_id": st.session_state.telegram_chat_id, "text": msg, "parse_mode": "HTML"})
-                    except:
-                        pass
+                    msg = f"🚨 CẢNH BÁO BÁN\nMã: <b>{symbol}</b>\nGiá mua: {buy_price}\nGiá hiện tại: {current_price:.2f}\nFinal Score: {final_score}\n15m: {s15} | 30m: {s30}"
+                    requests.get(f"https://api.telegram.org/bot{st.session_state.telegram_token}/sendMessage",
+                        params={"chat_id": st.session_state.telegram_chat_id, "text": msg, "parse_mode": "HTML"})
 
                 results.append({
                     "Mã CK": symbol,
                     "Giá mua": buy_price,
                     "Giá hiện tại": round(current_price, 2),
+                    "15m": s15,
                     "30m": s30,
-                    "1h": s1h,
-                    "4h": s4h,
                     "Final Score": final_score,
                     "Khuyến nghị": recommend,
                     "Ngành nghề": get_sector(symbol)
@@ -314,5 +314,4 @@ if st.button("🚨 Quét cảnh báo ngay", type="primary", use_container_width=
                 height=650
             )
 
-# Tự động refresh mỗi 5 phút
-st.caption("Warning System v2 - Đã tối ưu logic điểm cho cảnh báo bán")
+st.caption("Warning System v3 - Tối ưu cho cảnh báo bán • Auto 30 phút")

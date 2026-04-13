@@ -110,23 +110,15 @@ def save_holdings(holdings):
 if 'holdings' not in st.session_state:
     st.session_state.holdings = load_holdings()
 
-# ====================== TRỌNG SỐ MỚI (TỐI ƯU CHO CẢNH BÁO BÁN) ======================
-WEIGHTS = {
-    'Momentum':   0.32,   # Quan trọng nhất khi nắm giữ
-    'Volume':     0.25,   # Dòng tiền khô = dấu hiệu bán mạnh
-    'Trend':      0.18,
-    'Oscillator': 0.12,
-    'PriceAction':0.08,
-    'Volatility': 0.05
-}
+
 
 # ====================== TRỌNG SỐ MỚI (TẬP TRUNG CẢNH BÁO BÁN) ======================
 WEIGHTS = {
-    'Momentum':   0.33,   # Quan trọng nhất cho tín hiệu bán sớm
-    'Volume':     0.27,   # Dòng tiền khô = bán mạnh
-    'PriceAction':0.18,   # Phá support = bán khẩn
-    'Trend':      0.12,
-    'Oscillator': 0.10,
+    'Momentum':   0.40,   # Quan trọng nhất cho tín hiệu bán sớm
+    'Volume':     0.40,   # Dòng tiền khô = bán mạnh
+    'PriceAction':0.20,   # Phá support = bán khẩn
+    'Trend':      0.00,
+    'Oscillator': 0.00,
     'Volatility': 0.00   # Giảm trọng số vì ngắn hạn ít quan trọng
 }
 

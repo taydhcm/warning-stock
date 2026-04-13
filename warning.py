@@ -109,6 +109,25 @@ if 'holdings' not in st.session_state:
     st.session_state.holdings = load_holdings()
 
 # ====================== HÀM TÍNH CHỈ BÁO ======================
+# ====================== HÀM CHẤM ĐIỂM VOLUME ĐÃ CẢI TIẾN ======================
+def score_volume(obv_trend, vol_ratio):
+    """
+    Logic Volume mới - thực tế hơn cho cảnh báo bán
+    """
+    if obv_trend == "up" and vol_ratio > 1.5:      # Volume tăng mạnh + OBV tăng
+        return 9.0
+    elif obv_trend == "up" and vol_ratio > 1.25:   # Volume tăng vừa phải
+        return 7.8
+    elif obv_trend == "up":                        # OBV tăng nhưng volume bình thường
+        return 6.5
+    elif obv_trend == "flat" and vol_ratio > 1.2:
+        return 6.0
+    elif obv_trend == "down":                      # OBV giảm = rất xấu
+        return 3.8
+    elif vol_ratio < 0.85:                         # Volume khô rõ rệt
+        return 4.0
+    else:
+        return 5.5
 def calculate_view_scores(df, current_price, support):
     if df is None or df.empty or len(df) < 30:
         return {"PriceAction": 5.0, "Volume": 5.0, "OBV": 5.0}
@@ -120,24 +139,22 @@ def calculate_view_scores(df, current_price, support):
         # Price Action
         support_level = df['low'].rolling(20).min().iloc[-1]
         pa_score = 9.0 if current_price > support_level * 1.015 else \
-                   4.0 if current_price < support_level * 0.985 else 5.5
+                   3.5 if current_price < support_level * 0.985 else 5.5
 
-        # Volume
-        vol_ratio = volume.iloc[-1] / volume.rolling(20).mean().iloc[-1] if len(df) > 20 else 1.0
-        vol_score = 9.0 if vol_ratio > 1.4 else 4.0 if vol_ratio < 0.8 else 6.0
-
-        # OBV
+        # Volume + OBV
         obv = ta.obv(close, volume)
         obv_trend = "up" if obv.diff().iloc[-1] > 0 else "down" if obv.diff().iloc[-1] < 0 else "flat"
-        obv_score = 9.0 if obv_trend == "up" else 3.5 if obv_trend == "down" else 5.5
+        vol_ratio = volume.iloc[-1] / volume.rolling(20).mean().iloc[-1] if len(df) > 20 else 1.0
+
+        volume_score = score_volume(obv_trend, vol_ratio)
 
     except:
-        pa_score = vol_score = obv_score = 5.0
+        pa_score = volume_score = 5.0
 
     return {
         "PriceAction": pa_score,
-        "Volume": vol_score,
-        "OBV": obv_score
+        "Volume": volume_score,
+        "OBV": volume_score   # OBV và Volume dùng chung điểm để đơn giản
     }
 
 # ====================== TÍNH ĐIỂM TỔNG HỢP ======================

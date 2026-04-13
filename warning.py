@@ -15,7 +15,51 @@ warnings.filterwarnings('ignore')
 st.set_page_config(page_title="Warning System", layout="wide")
 st.title("🚨 Warning System - Cảnh báo vị thế đã mua")
 st.markdown("**Quét 3 timeframe • Tự động 5 phút • Gửi Telegram**")
+# ====================== DICTIONARY NGÀNH NGHỀ ======================
+SECTOR_MAP = {
+    "ACB": "Ngân hàng", "BID": "Ngân hàng", "VCB": "Ngân hàng", "CTG": "Ngân hàng", 
+    "HDB": "Ngân hàng", "MBB": "Ngân hàng", "SHB": "Ngân hàng", "STB": "Ngân hàng",
+    "TCB": "Ngân hàng", "TPB": "Ngân hàng", "VPB": "Ngân hàng", "LPB": "Ngân hàng",
+    "OCB": "Ngân hàng", "VIB": "Ngân hàng",
 
+    "HPG": "Thép - Vật liệu xây dựng", "HSG": "Thép", "NKG": "Thép",
+    "VHM": "Bất động sản", "VIC": "Bất động sản", "NVL": "Bất động sản", 
+    "PDR": "Bất động sản", "KBC": "Bất động sản", "DIG": "Bất động sản",
+    "VRE": "Bất động sản", "DXG": "Bất động sản",
+
+    "FPT": "Công nghệ - Thông tin", "MWG": "Bán lẻ", "PNJ": "Bán lẻ",
+    "FRT": "Bán lẻ", "DGW": "Bán lẻ",
+
+    "MSN": "Thực phẩm - Đồ uống", "VNM": "Sữa - Thực phẩm", "SAB": "Đồ uống",
+    "QNS": "Đường", "SBT": "Đường", "LSS": "Đường",
+
+    "POW": "Điện lực", "GAS": "Khí đốt", "PLX": "Xăng dầu",
+    "VJC": "Hàng không", "TCH": "Ô tô - Linh kiện",
+
+    "SSI": "Chứng khoán", "VCI": "Chứng khoán",
+
+    "GEX": "Vật liệu xây dựng", "DGC": "Hóa chất", "DPM": "Phân bón",
+    "DCM": "Phân bón", "BFC": "Phân bón",
+
+    "ANV": "Thủy sản", "VHC": "Thủy sản",
+
+    "REE": "Điện lạnh - Cơ điện", "GEG": "Điện", "PC1": "Xây dựng",
+
+    "KDH": "Bất động sản", "NLG": "Bất động sản", "TTA": "Bất động sản",
+    "HDG": "Bất động sản", "BCG": "Bất động sản",
+
+    "SAM": "Dệt may", "TNG": "Dệt may", "VGT": "Dệt may",
+
+    "PET": "Nhựa - Hóa chất", "CSV": "Nhựa", "LAS": "Nhựa",
+
+    "PVS": "Dầu khí", "PVD": "Dầu khí", "PVT": "Vận tải biển",
+    "HAH": "Vận tải", "VOS": "Vận tải",
+
+    "SCS": "Logistics", "VSC": "Vận tải",
+}
+
+def get_sector(symbol):
+    return SECTOR_MAP.get(symbol, "Khác / Chưa phân loại")
 # ====================== VNSTOCK API KEY ======================
 VNSTOCK_API_KEY = "vnstock_9008899a9dce77c13e296b6442ee866c"
 try:

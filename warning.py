@@ -110,18 +110,23 @@ def save_holdings(holdings):
 if 'holdings' not in st.session_state:
     st.session_state.holdings = load_holdings()
 
-# ====================== TRỌNG SỐ & HÀM CHẤM ĐIỂM ======================
+# ====================== TRỌNG SỐ MỚI (TỐI ƯU CHO CẢNH BÁO BÁN) ======================
 WEIGHTS = {
-    'Momentum': 0.30, 'Trend': 0.22, 'Volume': 0.18,
-    'Oscillator': 0.15, 'Volatility': 0.08, 'PriceAction': 0.07
+    'Momentum':   0.32,   # Quan trọng nhất khi nắm giữ
+    'Volume':     0.25,   # Dòng tiền khô = dấu hiệu bán mạnh
+    'Trend':      0.18,
+    'Oscillator': 0.12,
+    'PriceAction':0.08,
+    'Volatility': 0.05
 }
 
-# (Copy 6 hàm score_xxx từ file cũ của bạn vào đây)
-def score_momentum(crsi, price_vs_hvn="near_hvn"):
+# ====================== HÀM CHẤM ĐIỂM MỚI (NHẠY HƠN) ======================
+def score_momentum(crsi, price_vs_hvn):
     if crsi > 68 and price_vs_hvn == "above_hvn": return 9.5
-    elif crsi > 55 and price_vs_hvn in ["near_hvn", "above_hvn"]: return 8.0
-    elif 45 <= crsi <= 55: return 6.5
-    else: return 4.0
+    elif crsi > 58: return 8.0
+    elif crsi > 50: return 6.0
+    elif crsi < 45: return 3.5   # Momentum yếu rõ
+    else: return 5.0
 
 def score_trend(price, ma20, ma50):
     if price > ma20 > ma50: return 9.0
@@ -130,43 +135,42 @@ def score_trend(price, ma20, ma50):
     else: return 3.0
 
 def score_oscillator(rsi, stoch):
-    if 48 <= rsi <= 68 and stoch > 55: return 9.0
-    elif 40 <= rsi <= 72 and stoch > 40: return 7.0
-    elif rsi > 72 or rsi < 35: return 4.0
-    else: return 5.5
-
-def score_volume(obv_trend, vol_ratio):
-    if obv_trend == "up" and vol_ratio > 1.3: return 9.5
-    elif obv_trend == "up": return 7.5
-    elif vol_ratio > 1.2: return 6.0
-    else: return 4.5
-
-def score_volatility(band_width):
-    if band_width < 0.08: return 9.0
-    elif band_width < 0.12: return 6.5
-    else: return 4.5
-
-def score_price_action(current_price, support):
-    if current_price > support * 1.018: return 9.5
-    elif current_price > support * 1.008: return 7.0
+    if rsi > 72 or stoch > 80: return 3.5   # Quá mua → dễ điều chỉnh
+    if 48 <= rsi <= 68 and stoch > 55: return 8.5
+    elif 40 <= rsi <= 72: return 6.5
     else: return 4.0
 
-# ====================== CALCULATE VIEW SCORES ======================
+def score_volume(obv_trend, vol_ratio):
+    if obv_trend == "down": return 3.5          # OBV giảm = rất nguy hiểm
+    if obv_trend == "up" and vol_ratio > 1.4: return 9.0
+    if vol_ratio > 1.2: return 7.0
+    return 5.0
+
+def score_volatility(band_width):
+    if band_width < 0.08: return 8.5   # Co hẹp → sắp biến động mạnh
+    if band_width > 0.18: return 4.0   # Biến động quá lớn
+    return 6.0
+
+def score_price_action(current_price, support):
+    if current_price < support * 0.985: return 3.5   # Phá support = bán khẩn
+    if current_price > support * 1.018: return 8.5
+    return 5.5
+
+# ====================== TÍNH ĐIỂM TRÊN 1 TIMEFRAME ======================
 def calculate_view_scores(df, current_price, support):
-    if df is None or df.empty or len(df) < 20:
-        return {v: 5.0 for v in WEIGHTS.keys()}
+    if df is None or df.empty or len(df) < 30:
+        return {k: 5.0 for k in WEIGHTS}
 
     try:
         close = df['close']
         ma20 = close.rolling(20).mean().iloc[-1]
         ma50 = close.rolling(50).mean().iloc[-1]
         rsi = ta.rsi(close, length=14).iloc[-1]
-        stoch = ta.stoch(df['high'], df['low'], close)
-        stoch_k = stoch['STOCHk_14_3_3'].iloc[-1] if not stoch.empty else 50.0
+        stoch = ta.stoch(df['high'], df['low'], close)['STOCHk_14_3_3'].iloc[-1]
 
         obv = ta.obv(close, df['volume'])
         obv_trend = "up" if obv.diff().iloc[-1] > 0 else "down" if obv.diff().iloc[-1] < 0 else "flat"
-        vol_ratio = df['volume'].iloc[-1] / df['volume'].rolling(20).mean().iloc[-1] if len(df) > 20 else 1.0
+        vol_ratio = df['volume'].iloc[-1] / df['volume'].rolling(20).mean().iloc[-1]
 
         crsi = ta.crsi(close, df['high'], df['low'], length=3, fast=2, slow=100).iloc[-1] if len(df) > 100 else 50.0
 
@@ -175,37 +179,21 @@ def calculate_view_scores(df, current_price, support):
 
         price_vs_hvn = "near_hvn"
         pa_signal = "strong_bounce" if current_price > support * 1.015 else "neutral"
-        near_support = current_price <= support * 1.02
 
     except:
-        return {v: 5.0 for v in WEIGHTS.keys()}
+        return {k: 5.0 for k in WEIGHTS}
 
     scores = {}
     scores['Momentum']   = score_momentum(crsi, price_vs_hvn)
     scores['Trend']      = score_trend(current_price, ma20, ma50)
-    scores['Oscillator'] = score_oscillator(rsi, stoch_k)
+    scores['Oscillator'] = score_oscillator(rsi, stoch)
     scores['Volume']     = score_volume(obv_trend, vol_ratio)
     scores['Volatility'] = score_volatility(band_width)
     scores['PriceAction']= score_price_action(current_price, support)
 
     return scores
 
-def calculate_weighted_score(scores_dict):
-    weighted = sum(scores_dict.get(view, 5.0) * weight for view, weight in WEIGHTS.items())
-    strong = sum(1 for s in scores_dict.values() if s >= 7.0)
-    if strong >= 5: weighted += 1.2
-    elif strong >= 4: weighted += 0.8
-    elif strong >= 3: weighted += 0.4
-
-    if scores_dict.get('Momentum', 0) >= 8.0 and scores_dict.get('Volume', 0) >= 8.0:
-        weighted += 1.1
-
-    weak = sum(1 for s in scores_dict.values() if s <= 4.5)
-    if weak >= 3: weighted -= 0.7
-
-    return round(min(max(weighted, 3.0), 10.0), 2)
-
-# ====================== MULTI TIMEFRAME ======================
+# ====================== MULTI TIMEFRAME SCORE ======================
 def calculate_multi_timeframe_score(df_30m, df_1h, df_4h, current_price, support):
     s30 = calculate_view_scores(df_30m, current_price, support)
     s1h = calculate_view_scores(df_1h,  current_price, support)
@@ -215,8 +203,25 @@ def calculate_multi_timeframe_score(df_30m, df_1h, df_4h, current_price, support
     fs1h = calculate_weighted_score(s1h)
     fs4h = calculate_weighted_score(s4h)
 
+    # Trọng số: 1h quan trọng nhất cho cảnh báo bán
     final_score = (fs30 * 0.30) + (fs1h * 0.50) + (fs4h * 0.20)
+
     return round(final_score, 2), round(fs30, 2), round(fs1h, 2), round(fs4h, 2)
+
+def calculate_weighted_score(scores_dict):
+    weighted = sum(scores_dict.get(v, 5.0) * w for v, w in WEIGHTS.items())
+    strong = sum(1 for s in scores_dict.values() if s >= 7.5)
+    if strong >= 5: weighted += 1.2
+    elif strong >= 4: weighted += 0.8
+
+    mom = scores_dict.get('Momentum', 0)
+    vol = scores_dict.get('Volume', 0)
+    if mom >= 8.0 and vol >= 8.0: weighted += 1.1
+
+    weak = sum(1 for s in scores_dict.values() if s <= 4.5)
+    if weak >= 3: weighted -= 0.8
+
+    return round(min(max(weighted, 3.0), 10.0), 2)
 
 # ====================== LẤY DỮ LIỆU ======================
 @st.cache_data(ttl=300)
@@ -310,4 +315,4 @@ if st.button("🚨 Quét cảnh báo ngay", type="primary", use_container_width=
             )
 
 # Tự động refresh mỗi 5 phút
-st.caption("Hệ thống tự động quét mỗi 5 phút • Telegram alert khi có tín hiệu BÁN")
+st.caption("Warning System v2 - Đã tối ưu logic điểm cho cảnh báo bán")
